@@ -1,0 +1,157 @@
+library(tidyverse)
+
+rm(list=ls())
+
+##Genotyping on good individuals only and good loci only;
+
+good.ind <- read.table("./good.ind.50K.txt", header=T)
+good.snps <- read.table("./good.snps.minAF0.AvgReadDepth200.txt", header=T)
+
+colnames(good.ind)=c("sample")
+colnames(good.snps)=c("Locus_ID")
+
+##Follow GTscore pipeline
+#load GTscore
+source("./GTscore-master/GTscore-master/GTscore.R")
+
+
+#load locus table and allele reads file
+singleSNP_locusTable<-read.delim("./gtscore/LocusTable_singleSNPs.txt",header=TRUE,stringsAsFactors=FALSE)
+singleSNP_alleleReads<-read.delim("./gtscore/AlleleReads_singleSNPs.txt",header=TRUE,row.names=1,stringsAsFactors=FALSE)
+
+head(singleSNP_locusTable)
+singleSNP_alleleReads[1:5,1:5]
+
+#change ploidy to 4
+singleSNP_locusTable$ploidy=4
+
+#only include good inds in the alleleReads table
+col_names <- colnames(singleSNP_alleleReads) %>% 
+  str_remove_all("_L001_R1_001") 
+
+col_names <- as.character(map(strsplit(col_names, split="_"), 1)) #remove S##
+col_names <- str_replace_all(col_names, "\\.", "-") #replace . with -
+col_names <- str_replace_all(col_names, "^X", "") #remove leading X
+colnames(singleSNP_alleleReads) <- col_names
+
+singleSNP_alleleReads <- singleSNP_alleleReads %>% 
+  select(good.ind$sample)
+
+
+
+
+#generate singleSNP genotypes using the polyGen algorithm
+#it takes a while, be patient!
+polyGenResults_singleSNP<-polyGen(singleSNP_locusTable,singleSNP_alleleReads)
+
+polyGenResults_singleSNP[1:5,1:5]
+
+dim(singleSNP_locusTable)
+dim(singleSNP_alleleReads)
+dim(polyGenResults_singleSNP)
+
+###summarize single SNP resutls for loci
+singleSNP_summary<-summarizeGTscore(singleSNP_alleleReads, singleSNP_locusTable, polyGenResults_singleSNP)
+head(singleSNP_summary)
+summary(singleSNP_summary)
+
+good.snps <- singleSNP_summary %>% 
+  filter(AvgReadDepth>=200 & minAF>=0.01) %>% 
+  pull(Locus_ID)
+
+
+length(unique(as.character(map(strsplit(good.snps, split="_"), 1)))) #429 loci, 773 SNPs; 
+
+write.table(good.snps, "./good.snps.minAF01.AvgReadDepth200.txt", quote=F, row.names = F)
+
+###Only include good inds and good SNPs;
+singleSNP_locusTable_good <- singleSNP_locusTable %>% 
+  filter(Locus_ID %in% good.snps)
+
+singleSNP_alleleReads_good <- singleSNP_alleleReads %>% 
+  rownames_to_column("Locus_ID") %>% 
+  filter(Locus_ID %in% good.snps) %>% 
+  column_to_rownames("Locus_ID")
+
+
+polyGenResults_singleSNP_good<-polyGen(singleSNP_locusTable_good,singleSNP_alleleReads_good)
+
+dim(singleSNP_locusTable_good)
+dim(singleSNP_alleleReads_good)
+dim(polyGenResults_singleSNP_good)
+
+singleSNP_summary_good<-summarizeGTscore(singleSNP_alleleReads_good, singleSNP_locusTable_good, polyGenResults_singleSNP_good)
+summary(singleSNP_summary_good)
+dim(singleSNP_summary_good)
+
+write.table(singleSNP_summary_good, "./singleSNP_loci_summary_goodInds_goodSNPs.txt", quote=F, row.names = F)
+
+
+
+singleSNP_sampleSummary_good<-summarizeSamples(polyGenResults_singleSNP_good,singleSNP_alleleReads_good)
+
+GTscore_individualSummary_good<-read.table("gtscore/GTscore_individualSummary_edited.txt", header=T)
+
+GTscore_individualSummary_good<-left_join(singleSNP_sampleSummary_good,GTscore_individualSummary_good,by="sample")
+summary(GTscore_individualSummary_good)
+
+
+write.table(GTscore_individualSummary_good, "./singleSNP_individuals_summary_goodInds_goodSNPs.txt", quote=F, row.names = F)
+
+
+###plot genotype scatterplots per locus
+plotGenotypes(singleSNP_locusTable_good, singleSNP_alleleReads_good, polyGenResults_singleSNP_good, 
+              type='scatter', savePlot="Y", saveDir="./scatterPlots_loci_goodInds_goodSNPs/")
+
+#export
+#exportGenepop<-function(polygenResults,locusTable,exportParalogs=FALSE,
+#                        sampleWhitelist=NULL,locusWhitelist=NULL,
+#                        sampleBlacklist=NULL,locusBlacklist=NULL,filename="polygenResults.genepop")
+  
+  
+#exportRubias<-function(polygenResults,locusTable,sampleMetaData=NULL,
+#                       sampleWhitelist=NULL,locusWhitelist=NULL,
+#                       sampleBlacklist=NULL,locusBlacklist=NULL,filename="polygenResults_rubias.txt")
+
+dim(polyGenResults_singleSNP_good) 
+dim(singleSNP_locusTable_good)
+
+exportGenepop(polyGenResults_singleSNP_good,singleSNP_locusTable_good,exportParalogs = TRUE,
+              filename="polyGenResults_singleSNP_genepop_good.txt")
+#make sure to use exportParalogs=TRUE for ploidy=4; 
+
+
+
+combinedData<-cbind(singleSNP_locusTable_good,polyGenResults_singleSNP_good)
+#print(combinedData[1:5,1:5])
+#function to convert alleles to numeric code
+alleleConvert<-function(combinedData){
+  alleles<-unlist(strsplit(as.character(combinedData[3]),","))
+  genotypes<-combinedData[4:length(combinedData)]
+  if(nchar(alleles[1])==1){
+    numericAlleles<-str_replace_all(genotypes,"0",paste(rep("0",as.numeric(combinedData[2])*2),collapse=""))
+    numericAlleles<-str_replace_all(numericAlleles,c("A"="01","C"="02","G"="03","T"="04","-"="05"))
+    numericAlleles<-str_replace_all(numericAlleles,",","")
+  }else{
+    hapAlleles<-unlist(strsplit(as.character(combinedData[3]),","))
+    hapAlleleNumbers<-seq(1,length(hapAlleles),by=1)
+    #check if number allele for haplotype is already same length as ploidy, if not pad with a 0
+    hapAlleleNumbers<-ifelse(hapAlleleNumbers<10,paste("0",hapAlleleNumbers,sep=""),hapAlleleNumbers)
+    hapAlleleCode<-hapAlleleNumbers
+    names(hapAlleleCode)<-hapAlleles
+    numericAlleles<-str_replace_all(genotypes,"0",paste(rep("0",as.numeric(combinedData[2])*2),collapse=""))
+    numericAlleles<-str_replace_all(numericAlleles,hapAlleleCode)
+    numericAlleles<-str_replace_all(numericAlleles,",","")
+  }
+  return(numericAlleles)
+}
+#convert bases to genepop code
+genepopBases<-apply(combinedData,1,alleleConvert)
+rownames(genepopBases)<-colnames(polyGenResults_singleSNP_good)
+colnames(genepopBases)<-combinedData$Locus_ID
+genepopBases[1:5, 1:5]
+
+polyGenResults_singleSNP_good[1:5,1:5]
+
+write.table(genepopBases, "./polyGenResults_singleSNP_numeric_good.txt", quote=F, row.names = T)
+write.table(polyGenResults_singleSNP_good, "./polyGenResults_singleSNP_letter_good.txt", quote=F, row.names = T)

@@ -1,0 +1,9 @@
+
+
+dd <- read.table("./data/gtseq/true_parentage.txt", header=T)
+
+head(dd)
+
+length(unique(dd$Sample))
+length(unique(dd$Female_parent))
+length(unique(dd$Male_parent))

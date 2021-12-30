@@ -1,0 +1,25 @@
+rm(list=ls())
+
+
+popmap <- read.csv("./data/sturgeon_sampeinfo_updated.csv", header=T)
+
+popmap %>% 
+  select(Sample) %>% 
+  group_by(Sample) %>% 
+  summarise(n=n()) %>% 
+  view()
+
+
+head(popmap)
+
+popmap %>% 
+  group_by(Parentage.or.Populations.) %>% 
+  summarise(n=n())
+
+
+parentage <- read.csv("./data/stg_parentmap_ParentageOnly.csv", header=T)
+
+
+gen <- read.table("./data/polygene_geno_pop_input_greatLoci.txt", sep="\t", check.names = F, header=T)
+
+gen <- read.table("./data/polyGenResults_singleSNP_letter_good.txt", header=T)

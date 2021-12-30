@@ -1,0 +1,24 @@
+library(tidyverse)
+
+rm(list=ls())
+
+p550 <- read.csv("./primer_probe/stugeon_GTseq_Final_550_primer_annotations.csv", header=T)
+
+length(unique(p550$Sequence.Name)) #sequence name is the RAD tags
+
+pp <- read.table("./primer_probe/GTseq_sturgeon_primer_probe_MLB13.txt", sep="\t",header=T)
+
+length(unique(pp$Locus)) #check RAD loci
+
+l1 <- sort(unique(p550$Sequence.Name))
+l2 <- sort(unique(pp$Locus))
+
+drop <- read.csv("./primer_probe/LociToDrop_N48.csv", header=T)
+
+drop <- drop %>% 
+  pull(Locus)
+
+pp502 <- pp %>% 
+  filter(!Locus %in% drop)
+
+write.table(pp502, "primer_probe/GTseq_sturgeon_primer_probe_final502.txt", quote=F, row.names = F, sep='\t')

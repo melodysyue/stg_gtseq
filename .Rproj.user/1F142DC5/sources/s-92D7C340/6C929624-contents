@@ -1,0 +1,54 @@
+library(tidyverse)
+
+rm(list=ls())
+
+ind <- read.table("gtscore/GTscore_individualSummary_edited.txt", header=T)
+
+#on-target reads (OT reads): reads with primer/probe;
+
+summary(ind)
+
+##filter by at least 10,000 OT reads
+
+ind.f <- ind %>% 
+  filter(Primer.Probe.Reads >= 50000)
+
+#popmap
+pop <- read.table("./popmap/stg_popmap_PopOnly.csv", header=T, sep=c(","))
+parent <- read.table("./popmap/stg_parentmap_ParentageOnly.csv", header=T, sep=c(","))
+
+
+ind.f.parent <- ind.f %>% 
+  filter(sample %in% parent$Sample)
+
+ind.f.parent <- left_join(ind.f.parent, parent, by=c("sample"="Sample")) %>% 
+  select(sample, Female_parent, Male_parent, everything())
+
+
+ind.f.pop <- ind.f %>% 
+  filter(sample %in% pop$Sample)
+
+ind.f.pop <- left_join(ind.f.pop, pop, by=c("sample"="Sample")) %>% 
+  select(sample, Population, Lake, everything())
+
+#Note: Both samples labeled MM12_30 were sequenced.  The one with parents P041 & P016 should actually be MM12_60. 
+# The MM12_30 with my note that the spreadsheet said MM12_60 should be MM12_60.  
+# The tubes were sometimes difficult to read.  
+# I imagine the other one might have been overwritten when demultiplexing.
+
+good.ind <- ind.f %>% 
+  pull(sample) %>% 
+  unique()
+
+good.ind.parent <- ind.f.parent %>% 
+  pull(sample) %>% 
+  unique()
+
+good.ind.pop <- ind.f.pop %>% 
+  pull(sample) %>% 
+  unique()
+
+
+write.table(good.ind, "./good.ind.50K.txt", quote = F, row.names = F)
+write.table(good.ind.parent, "./good.ind.50K_ParentageOnly.txt", quote = F, row.names = F)
+write.table(good.ind.pop, "./good.ind.50K_PopOnly.txt", quote=F, row.names = F)

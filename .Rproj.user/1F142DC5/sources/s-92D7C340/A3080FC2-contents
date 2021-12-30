@@ -1,0 +1,35 @@
+library(tidyverse)
+
+
+rm(list=ls())
+
+info <- read.csv("./popmap/sturgeon_sampeinfo_updated.csv", header=T)
+
+
+
+pop <- info %>% 
+  filter(Parentage.or.Populations.=="Populations") %>% 
+  select(Sample, Population, Lake)
+
+
+parent <- info %>% 
+  filter(Parentage.or.Populations.=="Parentage") %>% 
+  select(Sample, Female_parent=Female.Parent, Male_parent=Male.Parent)
+
+
+
+length(unique(pop$Sample))
+
+length(unique(parent$Sample))
+
+parent$Sample[duplicated(parent$Sample)] #MM12-30 has two entries, with two different parent information; 
+
+#replace _ with -
+
+pop$Sample <- str_replace_all(pop$Sample, "_", "-")
+parent$Sample <- str_replace_all(parent$Sample, "_", "-")
+parent$Female_parent <- str_replace_all(parent$Female_parent, "_","-")
+parent$Male_parent <- str_replace_all(parent$Female_parent, "_", "-")
+
+write.csv(pop, "./popmap/stg_popmap_PopOnly.csv", quote=F, row.names = F)
+write.csv(parent, "./popmap/stg_parentmap_ParentageOnly.csv", quote=F, row.names = F)

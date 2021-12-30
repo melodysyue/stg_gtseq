@@ -1,0 +1,30 @@
+library(tidyverse)
+
+dd <- read.table("./data/GTseq_sturgeon_primer_probe_final502.txt", header=T)
+head(dd)
+
+length(unique(dd$Locus))
+
+dd %>% 
+  group_by(Locus, SNPpos) %>% 
+  select(Locus, SNPpos) %>% 
+  unique() %>% 
+  dim()
+
+
+
+n48 <- read.csv("./data/LociToDrop_N48.csv", header=T)
+length(unique(n48$Locus))
+
+
+n550 <- read.csv("./data/stugeon_GTseq_Final_550_primer_annotations.csv", header=T)
+n502.primer <- n550 %>% 
+  filter(Type=="primer_bind") %>% 
+  select(Locus=Sequence.Name, Direction, Sequence) %>% 
+  filter(!Locus %in% n48$Locus) %>% 
+  unique() %>% 
+  arrange(Locus)
+
+write.csv(n502.primer, "./data/N502_primer.csv", quote=F, row.names = F)
+
+       

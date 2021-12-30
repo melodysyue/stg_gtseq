@@ -1,0 +1,66 @@
+library(tidyverse)
+
+rm(list=ls())
+
+#individuals
+ind <- read.table("./gtscore/GTscore_individualSummary.txt", sep="\t", header=T)
+
+head(ind)
+
+ind$Sample <- str_replace_all(ind$Sample,"_L001_R1_001","")
+
+ind <- ind %>% 
+  separate(Sample, c("sample", "sequence_id"), "_", extra="merge") %>% 
+  mutate(OnTargetProp=1-Off.target.Proportion) %>% 
+  select(-sequence_id)
+
+
+hist(ind$OnTargetProp)
+hist(ind$Primer.Probe.Proportion)
+
+summary(ind)
+
+ind %>% 
+  #filter(Total.Reads<10000) %>% 
+  ggplot(aes(x=Total.Reads)) +
+  geom_histogram()
+
+#load plate map
+plate <- read.csv("./plate_map.csv", header=T)
+head(plate)
+plate$Sample <- str_replace_all(plate$Sample, "_", "-")
+
+
+plate$Sample[duplicated(plate$Sample)] #some samples are duplicated, so weird!
+
+plate$Sample[(!plate$Sample %in% ind$sample)] #150F-19 is missing fastq file; 
+
+plate.f <- plate %>% 
+  filter(Sample %in% ind$sample)
+
+plate.f.read <- left_join(plate.f, ind, by=c("Sample"="sample"))
+
+
+plate.f.read %>% 
+  group_by(Plate) %>% 
+  summarise(sum=sum(Total.Reads), mean=mean(Total.Reads)) #pretty even among plates; 
+
+
+#loci
+
+n=936
+loci <- read.table("./gtscore/GTscore_locusSummary.txt", sep="\t", header=T)
+summary(loci)
+
+head(loci)
+
+loci <- loci %>% 
+  mutate(prop_total=round(Primer.Reads/sum(Primer.Reads),4)) %>% 
+  mutate(avg_per_ind=Primer.Reads/n)
+
+head(loci)
+
+write.table(ind, "./gtscore/GTscore_individualSummary_edited.txt", quote=F, row.names = F)
+write.table(loci, "./gtscore/GTscore_locusSummary_edited.txt", quote=F, row.names = F)
+
+          

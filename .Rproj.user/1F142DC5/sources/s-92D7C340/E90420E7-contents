@@ -1,0 +1,433 @@
+---
+title: 'PolyFreqs for Lake Sturgeon Project'
+author: "Yue Shi"
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 4
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_depth: '4'
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE, warning=FALSE, message=FALSE)
+```
+
+## Assessing the MCMC run
+
+Whenever one runs MCMC, it is important to assess its performance. There are ways to spot when things go wrong. We will look at assessing a few aspects of MCMC: 
+
+**mixing**: we are aiming for the trace plot to look like a hairy caterpillar.
+
+**convergence**: ESS(effective sample size): the number of independent samples equivalent to our number of autocorrelated samples.The larger the better. If the ESS of a parameter is small then the estimate of the posterior distribution of that parameter will be poor.The samples in the burn-in are not very informative, and if the burn-in period is estimated to be too short this will reduce the ESS size. On the other hand, if the burn-in period is estimated to be too long, informative samples are being thrown away, again reducing the ESS. The ESS should be maximised at the optimal estimate of the burn-in. ESS > 100-200 would be better. chasing ESSs > 10000 may be a waste of computational resources.
+
+**autocorrelation**: If autocorrelation persists, we can thin the MCMC chain, that is we discard n samples for every sample that we keep.
+
+The model in polyfreqs assumes that all loci undergo polysomic inheritance. If this isn’t the case, then it would nice to know that. Doing posterior predictive simulations based on the output from a polyfreqs analysis is a nice way of testing the adequacy of a model of polysomic inheritance on a per locus basis. use *polyfreqs_pps*, two output are generated:
+
+**ratio_diff**: The posterior predictive samples of the difference between the simulated read ratios and the observed read ratio summed across individuals at each locus. The observed read count ratio (r/t) for each locus is summed across individuals and then compared to a distribution of read ratios simulated using the posterior allele frequencies by taking their difference. The criterion for passing/failing the posterior predictive check is then made on a per locus basis based on whether or not the distribution of read ratio differences contains 0.
+
+**locus_fit**: A logical vector indicating whether or not each locus passed or failed the posterior predictive model check.
+
+Run all the populations in a parallel fashion. Since mclapply doesn't work on windows. So let's use foreach and doParalle. 
+
+
+### Get it ready
+```{r}
+rm(list=ls())
+library(coda)
+library(tidyverse)
+library(polyfreqs)
+
+##get the input files ready;
+tot_files <- list.files(path = "./readcount", pattern = "*_Total_Reads_4n.txt", full.names=TRUE) %>% 
+  lapply(read.table,row.names=1, header=TRUE)
+
+ref_files <- list.files(path = "./readcount", pattern = "*_Reference_Reads_4n.txt", full.names=TRUE) %>% 
+  lapply(read.table,row.names=1, header=TRUE) 
+
+post_files <- list.files(path = "./mcmc_output", pattern="*_mcmc.out", full.names=TRUE) %>% 
+  lapply(read.table,row.names=1, header=TRUE)
+
+exp_files <- list.files(path = "./het_exp", pattern="*_het_exp.txt", full.names=TRUE) %>% 
+  lapply(read.table)
+
+obs_files <- list.files(path = "./het_obs", pattern="*_het_obs.txt", full.names=TRUE) %>% 
+  lapply(read.table) 
+
+
+##burn-in 25%
+
+for (i in 1:16){
+  post_files[[i]]=post_files[[i]][251:1000,]
+  exp_files[[i]]=as.matrix(exp_files[[i]])[251:1000,]
+  obs_files[[i]]=as.matrix(obs_files[[i]])[251:1000,]
+}
+
+
+pops <- sub("_Total_Reads_4n.txt", "", list.files(path="./readcount", pattern = "*_Total_Reads_4n.txt"))
+
+```
+
+
+### MCMC
+```{r}
+##mcmc. Note: I tried to use dopar, but I found out it has a really high overhead. But just for fun, let's do this; 
+
+mcmc_files <- lapply(post_files,mcmc)
+
+pdf(file="polyfreqs_ess.pdf")
+for(i in 1:16){
+  hist(effectiveSize(mcmc_files[[i]]), xlab="ESS", main=paste("Population", pops[i]))
+  abline(v=200, col="red")
+}
+dev.off()
+```
+
+
+### Trace plots
+```{r}
+
+pdf(file="polyfreqs_trace_L29.pdf")  
+for (i in 1:16){
+  plot(mcmc_files[[i]][,29], main=paste0("Population ",pops[i]," at locus 29")) #arbitrarily choose 29, just to look at 29th locus;
+}   
+dev.off() 
+
+pdf(file="polyfreqs_trace_L2020.pdf")  
+for (i in 1:16){
+  plot(mcmc_files[[i]][,2020], main=paste0("Population ",pops[i]," at locus 2020")) 
+}   
+dev.off() 
+
+pdf(file="polyfreqs_trace_L20115.pdf")  
+for (i in 1:16){
+  plot(mcmc_files[[i]][,20115], main=paste0("Population ",pops[i]," at locus 20115")) 
+}   
+dev.off() 
+```
+
+
+### Check model assumption
+
+```{r}
+
+pdf(file="polyfreqs_ratio_diff.pdf")
+for(i in 1:16){
+  pps <- polyfreqs_pps(
+  as.matrix(post_files[[i]]), 
+  as.matrix(tot_files[[i]]), 
+  as.matrix(ref_files[[i]]),
+  ploidy=4, error=0.01)
+  
+  for(j in c(20,2020,22115)){
+    plot(density(pps$ratio_diff[,j]), main=paste("Posterior predictive distribution of read ratio diffference of \n
+                                                 Population", pops[i], "at locus", j))
+    abline(v=0, col="red")
+  }
+}
+
+dev.off()
+
+```
+
+### Check heterozygosity
+
+```{r}
+
+
+multi_exp_files <- lapply(exp_files, apply, 1, mean, na.rm=T) 
+multi_obs_files <- lapply(obs_files, apply, 1, mean, na.rm=T) 
+
+ess_exp_files <- lapply(multi_exp_files, mcmc) %>%  #sapply return a vector
+  sapply(effectiveSize)
+
+ess_obs_files <- lapply(multi_obs_files, mcmc) %>% 
+  sapply(effectiveSize)
+
+mean(multi_exp_files[[1]])
+mean(multi_obs_files[[1]])
+
+
+
+mean_hexp <- sapply(multi_exp_files, mean)
+mean_hobs <- sapply(multi_obs_files, mean)
+
+het <- data.frame(pop=pops,mean_Hexp=mean_hexp,mean_Hobs=mean_hobs,ESS_Hexp=ess_exp_files,ESS_Hobs=ess_obs_files)
+
+write.csv(het,"polyfreqs_het_summary.csv",quote=FALSE,row.names=FALSE)
+
+
+```
+
+
+
+## Generate statistics for all the loci as a summmary across all pops
+
+
+### Check dimensions of required files
+```{r}
+dim(exp_files[[1]])
+dim(obs_files[[16]])
+dim(post_files[[1]])
+
+#16 populations, for each population, there are 750 rows * 22358 columns.  
+```
+
+
+### Hexp and hobs (mean and variance across all pops)
+```{r}
+exp_posterior_perlocus <- as.data.frame(lapply(exp_files, apply, 2, mean),col.names=pops)
+obs_posterior_perlocus <- as.data.frame(lapply(obs_files, apply, 2, mean),col.names=pops)
+
+head(exp_posterior_perlocus)
+head(obs_posterior_perlocus)
+
+exp_posterior_perlocus.mean <- apply(exp_posterior_perlocus, 1, mean)
+exp_posterior_perlocus.var <- apply(exp_posterior_perlocus, 1, var)
+obs_posterior_perlocus.mean <- apply(obs_posterior_perlocus, 1, mean)
+obs_posterior_perlocus.var <- apply(obs_posterior_perlocus, 1, var)
+
+write.csv(exp_posterior_perlocus,"./results_run2/Hexp_locus_population.csv", quote=FALSE)
+write.csv(obs_posterior_perlocus,"./results_run2/Hobs_locus_population.csv", quote=FALSE)
+
+
+
+```
+
+### Allele frequency (mean and variance across all pops)
+```{r}
+af_posterior_perlocus <- as.data.frame(lapply(post_files, apply, 2, mean),col.names=pops)
+rownames(af_posterior_perlocus)=rownames(exp_posterior_perlocus)
+
+af_posterior_perlocus.mean <- apply(af_posterior_perlocus, 1, mean)
+af_posterior_perlocus.var <- apply(af_posterior_perlocus, 1, var)
+
+h.af <- cbind(Hexp.mean=exp_posterior_perlocus.mean, Hexp.var=exp_posterior_perlocus.var, Hobs.mean=obs_posterior_perlocus.mean, Hobs.var=obs_posterior_perlocus.var, Af.mean=af_posterior_perlocus.mean, Af.var=af_posterior_perlocus.var)
+
+write.csv(af_posterior_perlocus,"./results_run2/posteriorAF_bypop.csv", quote=FALSE)
+write.csv(h.af, "sumstats_acrosspops.csv", quote=FALSE)
+```
+
+### Overall Fst across all populations
+
+```{r}
+
+#population size per popualtion
+popsizes <- as.data.frame(lapply(tot_files,nrow))
+colnames(popsizes)=pops
+
+#AF per population
+head(af_posterior_perlocus)
+dim(af_posterior_perlocus) #22358 * 16
+
+#Hexp per pop
+head(exp_posterior_perlocus)
+dim(exp_posterior_perlocus) #22358 *16
+```
+
+
+####Calculate the p_bar, q_bar over the entire population (across all populations)
+
+p_bar=2 X sum of (p_iN_i) / 2 X N_total. Note: 2 can be calceled out. So p_bar=sum(p_iN_i)/N_total.
+
+p_i is allele frequency in each population, which is a matrix, af_posterior_perlocus. Whereas, N_i is pop size in each population, which is a vecvtor. Therefore, sum of (p_iN_i) is a math problem of multiplying a matrix and a vector.
+```{r}
+
+N_total <- sum(popsizes)
+
+af_posterior_perlocus=as.matrix(af_posterior_perlocus)
+
+p_N <- af_posterior_perlocus %*% t(popsizes) #The %*% operator in R does matrix multiplication
+p_bar <- p_N / N_total #22358*1
+q_bar <- 1-p_bar #22358*1
+```
+
+####Calculate the H_T
+
+H_T = 1 - (p_bar^2 + q_bar^2)
+```{r}
+H_T <- 1-p_bar^2-q_bar^2
+head(H_T)
+dim(H_T) #22358*1
+```
+
+####Calculate the H_s
+H_S=sum(Hexp_iNi)/N_total. Hexp_i is expected heterozygosity in each population, which is a matrix, exp_posterior_perlocus. Ni is population size in each popualtion, which is a vector. Again, this is matrix, vector multiplication problem. 
+
+```{r}
+exp_posterior_perlocus <- as.matrix(exp_posterior_perlocus)
+exp_N <- exp_posterior_perlocus%*%t(popsizes)
+H_S <- exp_N/N_total
+
+head(H_S)
+dim(H_S)
+```
+
+####Finally, calculate Fst
+```{r}
+head(H_T)
+head(H_S)
+Fst <- (H_T-H_S)/H_T
+
+Fst=as.vector(Fst)
+p_bar=as.vector(p_bar)
+
+sum.stats <- data.frame(Hexp.mean_4n=exp_posterior_perlocus.mean, Hexp.var_4n=exp_posterior_perlocus.var, Hobs.mean_4n=obs_posterior_perlocus.mean, Hobs.var_4n=obs_posterior_perlocus.var, Af.mean_4n=af_posterior_perlocus.mean, Af.var_4n=af_posterior_perlocus.var, Af_overall_4n=p_bar, Fst_overall_4n=Fst)
+write.csv(sum.stats, "./results_run2/sumstats_acrosspops.csv", quote=FALSE)
+
+```
+
+
+####Calculate Fis
+Fis=(Hs-HI)/Hs
+```{r}
+obs_posterior_perlocus <- as.matrix(obs_posterior_perlocus)
+obs_N <- obs_posterior_perlocus%*%t(popsizes)
+H_I <- obs_N/N_total
+Fis <- (H_S-H_I)/H_S
+
+sum.stats <- data.frame(Hexp.mean_4n=exp_posterior_perlocus.mean, Hexp.var_4n=exp_posterior_perlocus.var, Hobs.mean_4n=obs_posterior_perlocus.mean, Hobs.var_4n=obs_posterior_perlocus.var, Af.mean_4n=af_posterior_perlocus.mean, Af.var_4n=af_posterior_perlocus.var, Af_overall_4n=p_bar, Fst_overall_4n=Fst, Fis_overall=Fis)
+write.csv(sum.stats, "./results_run2/sumstats_acrosspops_Fis.csv", quote=FALSE)
+
+```
+
+
+
+
+
+Repeat the same process for diploid data
+```{r}
+post_files_2n <- list.files(path = "./mcmc_2n_output", pattern="*_mcmc_2n.out", full.names=TRUE) %>% 
+  lapply(read.table,row.names=1, header=TRUE)
+
+exp_files_2n <- list.files(path = "./het_exp_2n", pattern="*_het_exp_2n.txt", full.names=TRUE) %>% 
+  lapply(read.table)
+
+obs_files_2n <- list.files(path = "./het_obs_2n", pattern="*_het_obs_2n.txt", full.names=TRUE) %>% 
+  lapply(read.table) 
+
+
+##burn-in 25%
+
+for (i in 1:16){
+  post_files_2n[[i]]=post_files_2n[[i]][251:1000,]
+  exp_files_2n[[i]]=as.matrix(exp_files_2n[[i]])[251:1000,]
+  obs_files_2n[[i]]=as.matrix(obs_files_2n[[i]])[251:1000,]
+}
+
+
+exp_posterior_perlocus_2n <- as.data.frame(lapply(exp_files_2n, apply, 2, mean),col.names=pops)
+obs_posterior_perlocus_2n <- as.data.frame(lapply(obs_files_2n, apply, 2, mean),col.names=pops)
+
+
+exp_posterior_perlocus_2n.mean <- apply(exp_posterior_perlocus_2n, 1, mean)
+exp_posterior_perlocus_2n.var <- apply(exp_posterior_perlocus_2n, 1, var)
+obs_posterior_perlocus_2n.mean <- apply(obs_posterior_perlocus_2n, 1, mean)
+obs_posterior_perlocus_2n.var <- apply(obs_posterior_perlocus_2n, 1, var)
+
+write.csv(exp_posterior_perlocus_2n,"Hexp_locus_population_2n.csv", quote=FALSE)
+write.csv(obs_posterior_perlocus_2n,"Hobs_locus_population_2n.csv", quote=FALSE)
+
+
+af_posterior_perlocus_2n <- as.data.frame(lapply(post_files_2n, apply, 2, mean),col.names=pops)
+rownames(af_posterior_perlocus_2n)=rownames(exp_posterior_perlocus_2n)
+
+af_posterior_perlocus_2n.mean <- apply(af_posterior_perlocus_2n, 1, mean)
+af_posterior_perlocus_2n.var <- apply(af_posterior_perlocus_2n, 1, var)
+
+
+write.csv(af_posterior_perlocus_2n,"posteriorAF_bypop_2n.csv", quote=FALSE)
+
+
+### Overall Fst across all populations
+
+####Calculate the p_bar, q_bar over the entire population (across all populations)
+
+af_posterior_perlocus_2n=as.matrix(af_posterior_perlocus_2n)
+
+p_N_2n <- af_posterior_perlocus_2n %*% t(popsizes) #The %*% operator in R does matrix multiplication
+p_bar_2n <- p_N_2n / N_total #22358*1
+q_bar_2n <- 1-p_bar_2n #22358*1
+H_T_2n <- 1-p_bar_2n^2-q_bar_2n^2
+
+
+exp_posterior_perlocus_2n <- as.matrix(exp_posterior_perlocus_2n)
+exp_N_2n <- exp_posterior_perlocus_2n%*%t(popsizes)
+H_S_2n <- exp_N_2n/N_total
+
+Fst_2n <- (H_T_2n-H_S_2n)/H_T_2n
+
+Fst_2n=as.vector(Fst_2n)
+p_bar_2n=as.vector(p_bar_2n)
+
+sum.stats_2n <- data.frame(Loci=rownames(sum.stats_2n),Hexp.mean_2n=exp_posterior_perlocus_2n.mean, Hexp.var_2n=exp_posterior_perlocus_2n.var, Hobs.mean_2n=obs_posterior_perlocus_2n.mean, Hobs.var_2n=obs_posterior_perlocus_2n.var, Af.mean_2n=af_posterior_perlocus_2n.mean, Af.var_2n=af_posterior_perlocus_2n.var,Af_overall_2n=p_bar_2n, Fst_overall_2n=Fst_2n)
+
+write.csv(sum.stats_2n, "sumstats_acrosspops_2n.csv", quote=FALSE)
+
+```
+
+###Compare tetraploidy and diploidy
+
+```{r}
+
+p.obs <- data.frame(n4=sum.stats$Hobs.mean_4n,n2=sum.stats_2n$Hobs.mean_2n) %>% 
+  ggplot(aes(x=n4, y=n2))+
+  geom_point()+
+  theme_classic(base_size = 15)+
+  geom_abline(slope=1,col="red")+
+  coord_fixed(ratio=1)+
+  labs(x= "Mean Hobs when modeled as tetroploid",
+       y= "Mean Hobs when modeled as diploid")+
+  expand_limits(x=c(0,0.7), y=c(0,0.7))+
+  scale_x_continuous(expand=c(0,0))+
+  scale_y_continuous(expand=c(0,0))
+
+ggsave(filename="compareHobs_tetrap_diploid.pdf", plot=p.obs,width =12,height=8)
+
+p.fst <- data.frame(n4=sum.stats$Fst_overall_4n, n2=sum.stats_2n$Fst_overall_2n) %>%
+  ggplot(aes(x=n4, y=n2))+
+  geom_point()+
+  theme_classic(base_size = 15)+
+  geom_abline(slope=1,col="red")+
+  coord_fixed(ratio=1)+
+  labs(x= "Overall Fst when modeled as tetroploid",
+       y= "Overall Fst when modeled as diploid")+
+  expand_limits(x=c(0,0.5), y=c(0,0.5))+
+  scale_x_continuous(expand=c(0,0))+
+  scale_y_continuous(expand=c(0,0))
+
+ggsave(filename="compareFst_tetrap_diploid.pdf", plot=p.fst,width =12,height=8)
+
+```
+
+### Pick loci
+
+Pick top 50 loci with highest Fst. 
+```{r}
+
+sum.stats <- read.csv("./results_run1/sumstats_acrosspops.csv", header=TRUE)
+sum.stats_2n <- read.csv("./results_run1/sumstats_acrosspops_2n.csv", header=TRUE)
+
+top_4n <- sum.stats %>% 
+  drop_na() %>% 
+  arrange(desc(Fst_overall_4n)) %>% 
+  head(n=1500) 
+
+top_2n <- sum.stats_2n %>% 
+  drop_na() %>% 
+  arrange(desc(Fst_overall_2n)) %>% 
+  head(n=1500)
+
+overlaps <- inner_join(top_4n, top_2n, by="Loci")
+dim(overlaps)
+
+
+
+write.csv(overlaps, "topLoci_overlap.csv", quote=FALSE)
+```
+
+
