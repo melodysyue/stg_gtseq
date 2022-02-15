@@ -1,0 +1,20 @@
+library(tidyverse)
+
+primer <- read.csv("data/panel_development/N502_primer.csv", header=T)
+
+snps <- read.table("./data/gtseq/minAF01_AvgReadDepth200_429loci_773SNPs_AlleleRatioCategory.list", header = T)
+
+head(snps)
+
+great <- snps %>% 
+  filter(category=="great") %>% 
+  separate(snpID, c("loci", "snp"), "_") %>% 
+  view()
+  pull(loci) %>% 
+  unique()
+
+primer.great <- primer %>% 
+  filter(Locus %in% great)
+
+write.csv(primer.great, "./data/panel_development/primer_great.csv", quote=F, row.names=F)
+  

@@ -12,6 +12,7 @@
   - sumstats_acrosspops.csv: summary statistics for 55,112 SNPs, generated using polyfreqs output files. 
   - N502_primer.csv: primer information of 502 loci in the final optimized GTseq panel.
   - GTseq_sturgeon_primer_probe_final502.txt: primer/probe file for the final GTseq panel with 502 loci. 
+  - primer_great.csv: primer information of 206 loci with 258 great SNPs. 
   
 `./data/gtseq/`: 
   - sturgeon_sampleinfo_updated.csv: sample meta information for 936 samples used in GTseq.
